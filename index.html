@@ -1,0 +1,443 @@
+import React, { useMemo, useState } from "react";
+
+// Bluebook color palette
+const BLUEBOOK_BLUE = "#0056A8"; // vibrant bright blue
+const BLUEBOOK_BLUE_LIGHT = "#1976D2";
+
+// All rules you want to cover in the game.
+// Each entry will be split into a pair:
+//   one tile that shows the rule number (e.g., "Rule 11") and
+//   one tile that shows the topic (e.g., "Constitutions").
+// NOTE: The last two entries (r22, r23) are placeholders so you can
+//       edit them to match your actual additional rules.
+const RULE_PAIRS: { key: string; rule: string; topic: string }[] = [
+  { key: "r1", rule: "Rule 1", topic: "Structure & Use of Citations" },
+  { key: "r2", rule: "Rule 2", topic: "Typefaces for Law Reviews" },
+  { key: "r3", rule: "Rule 3", topic: "Subdivisions" },
+  { key: "r4", rule: "Rule 4", topic: "Short Citation Forms" },
+  { key: "r5", rule: "Rule 5", topic: "Quotations" },
+  { key: "r6", rule: "Rule 6", topic: "Abbreviations, Numerals & Symbols" },
+  { key: "r7", rule: "Rule 7", topic: "Italicization for Style" },
+  { key: "r8", rule: "Rule 8", topic: "Capitalization" },
+  { key: "r9", rule: "Rule 9", topic: "Titles of Judges & Courts" },
+  { key: "r10", rule: "Rule 10", topic: "Cases" },
+  { key: "r11", rule: "Rule 11", topic: "Constitutions" },
+  { key: "r12", rule: "Rule 12", topic: "Statutes" },
+  { key: "r13", rule: "Rule 13", topic: "Legislative Materials" },
+  { key: "r14", rule: "Rule 14", topic: "Administrative & Executive Materials" },
+  { key: "r15", rule: "Rule 15", topic: "Books & Other Nonperiodic Materials" },
+  { key: "r16", rule: "Rule 16", topic: "Periodical Materials" },
+  { key: "r17", rule: "Rule 17", topic: "Unpublished & Forthcoming Sources" },
+  { key: "r18", rule: "Rule 18", topic: "Internet & Electronic Media" },
+  { key: "r19", rule: "Rule 19", topic: "Services" },
+  { key: "r20", rule: "Rule 20", topic: "Foreign Materials" },
+  { key: "r21", rule: "Rule 21", topic: "International Materials" },
+  { key: "r22", rule: "Rule 22", topic: "Tribal Nations" },
+  { key: "r23", rule: "Rule 23", topic: "Archival Sources" },
+];
+
+type TileType = "rule";
+
+interface Tile {
+  id: number;
+  type: TileType;
+  key: string; // key used for matching
+  label: string;
+  isFlipped: boolean;
+  isMatched: boolean;
+}
+
+interface LevelConfig {
+  id: number;
+  name: string;
+  description: string;
+  ruleKeys: string[]; // which rules appear in this level
+  rows: number;
+  cols: number;
+}
+
+// Multiple levels with smaller boards.
+// Every rule key appears in at least one level.
+const LEVELS: LevelConfig[] = [
+  {
+    id: 1,
+    name: "Level 1: Foundations",
+    description: "Start with core citation structures (Rules 1–5).",
+    ruleKeys: ["r1", "r2", "r3", "r4", "r5"], // 5 rules → 10 tiles
+    rows: 2,
+    cols: 5,
+  },
+  {
+    id: 2,
+    name: "Level 2: Style & Formatting",
+    description: "Work with typography and basic style rules (Rules 6–10).",
+    ruleKeys: ["r6", "r7", "r8", "r9", "r10"], // 5 rules → 10 tiles
+    rows: 2,
+    cols: 5,
+  },
+  {
+    id: 3,
+    name: "Level 3: Core Sources",
+    description: "Match constitutions, statutes, and key materials (Rules 11–15).",
+    ruleKeys: ["r11", "r12", "r13", "r14", "r15"], // 5 rules → 10 tiles
+    rows: 2,
+    cols: 5,
+  },
+  {
+    id: 4,
+    name: "Level 4: Advanced Sources",
+    description: "Electronic media and services (Rules 16–19).",
+    ruleKeys: ["r16", "r17", "r18", "r19"], // 4 rules → 8 tiles
+    rows: 2,
+    cols: 4,
+  },
+  {
+    id: 5,
+    name: "Level 5: Foreign & International",
+    description: "Foreign, International, Tribal Nations, and Archival Sources (Rules 20–23).",
+    ruleKeys: ["r20", "r21", "r22", "r23"], // 4 rules → 8 tiles
+    rows: 2,
+    cols: 4,
+  },
+];
+
+function shuffleArray<T>(array: T[]): T[] {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function createTilesForLevel(level: LevelConfig): Tile[] {
+  let idCounter = 1;
+
+  const tiles: Tile[] = level.ruleKeys.flatMap((ruleKey) => {
+    const rule = RULE_PAIRS.find((r) => r.key === ruleKey);
+    if (!rule) {
+      return [] as Tile[];
+    }
+
+    const numberTile: Tile = {
+      id: idCounter++,
+      type: "rule",
+      key: rule.key,
+      label: rule.rule, // e.g., "Rule 11"
+      isFlipped: false,
+      isMatched: false,
+    };
+
+    const topicTile: Tile = {
+      id: idCounter++,
+      type: "rule",
+      key: rule.key,
+      label: rule.topic, // e.g., "Constitutions"
+      isFlipped: false,
+      isMatched: false,
+    };
+
+    return [numberTile, topicTile];
+  });
+
+  const expectedCount = level.rows * level.cols;
+  if (tiles.length !== expectedCount) {
+    console.warn(
+      `Level ${level.id} expected ${expectedCount} tiles, but created ${tiles.length}. Check ruleKeys/rows/cols.`,
+    );
+  }
+
+  return shuffleArray(tiles);
+}
+
+const BluebookMatchingGame: React.FC = () => {
+  const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
+  const currentLevel = LEVELS[currentLevelIndex];
+
+  const [tiles, setTiles] = useState<Tile[]>(() =>
+    createTilesForLevel(currentLevel),
+  );
+  const [flippedIds, setFlippedIds] = useState<number[]>([]);
+  const [isChecking, setIsChecking] = useState(false);
+  const [moves, setMoves] = useState(0);
+  const [matchesFound, setMatchesFound] = useState(0);
+  const [pulseIds, setPulseIds] = useState<number[]>([]);
+  const [pulseType, setPulseType] = useState<'success' | 'fail' | null>(null);
+
+  const totalRulePairs = currentLevel.ruleKeys.length;
+
+  const loadLevel = (index: number) => {
+    const safeIndex = Math.min(Math.max(index, 0), LEVELS.length - 1);
+    const level = LEVELS[safeIndex];
+    setCurrentLevelIndex(safeIndex);
+    setTiles(createTilesForLevel(level));
+    setFlippedIds([]);
+    setIsChecking(false);
+    setMoves(0);
+    setMatchesFound(0);
+  };
+
+  const resetGame = () => {
+    loadLevel(currentLevelIndex);
+  };
+
+  const triggerMatchConfetti = () => {
+  // Confetti disabled per latest requirements.
+  return;
+};
+
+  const handleTileClick = (tileIndex: number) => {
+    const tile = tiles[tileIndex];
+
+    // Ignore clicks while checking, on matched tiles, or on already flipped tiles.
+    if (isChecking || tile.isMatched || tile.isFlipped) {
+      return;
+    }
+
+    const newTiles = tiles.map((t, i) =>
+      i === tileIndex ? { ...t, isFlipped: true } : t,
+    );
+    const newFlippedIds = [...flippedIds, tile.id];
+
+    setTiles(newTiles);
+    setFlippedIds(newFlippedIds);
+
+    if (newFlippedIds.length === 2) {
+      setIsChecking(true);
+      setMoves((m) => m + 1);
+
+      // Quick peek at the second card, then pulse + handle match/mismatch
+      setTimeout(() => {
+        const [firstId, secondId] = newFlippedIds;
+        const firstTileIndex = newTiles.findIndex((t) => t.id === firstId);
+        const secondTileIndex = newTiles.findIndex((t) => t.id === secondId);
+
+        if (firstTileIndex === -1 || secondTileIndex === -1) {
+          setIsChecking(false);
+          setFlippedIds([]);
+          return;
+        }
+
+        const firstTile = newTiles[firstTileIndex];
+        const secondTile = newTiles[secondTileIndex];
+
+        if (firstTile.key === secondTile.key) {
+          // It's a match! Quick green pulse + confetti
+          triggerMatchConfetti();
+          setPulseIds([firstId, secondId]);
+          setPulseType("success");
+
+          const updatedTiles = [...newTiles];
+          updatedTiles[firstTileIndex] = {
+            ...firstTile,
+            isMatched: true,
+          };
+          updatedTiles[secondTileIndex] = {
+            ...secondTile,
+            isMatched: true,
+          };
+          setTiles(updatedTiles);
+          setMatchesFound((prev) => prev + 1);
+
+          // Clear pulse after a short flash
+          setTimeout(() => {
+            setPulseIds([]);
+            setPulseType(null);
+          }, 220);
+
+          setFlippedIds([]);
+          setIsChecking(false);
+        } else {
+          // Not a match: pulse red quickly, then wait and flip back
+          setPulseIds([firstId, secondId]);
+          setPulseType("fail");
+
+          // Keep them face-up during the pulse
+          setTiles(newTiles);
+
+          // Short pulse (~220ms), then wait 1200ms, then flip back
+          setTimeout(() => {
+            // Clear pulse but keep cards face-up while the player processes
+            setPulseIds([]);
+            setPulseType(null);
+
+            setTimeout(() => {
+              const resetTiles = newTiles.map((t) =>
+                t.id === firstId || t.id === secondId
+                  ? { ...t, isFlipped: false }
+                  : t,
+              );
+              setTiles(resetTiles);
+              setFlippedIds([]);
+              setIsChecking(false);
+            }, 1200);
+          }, 220);
+        }
+      }, 200);
+    }};
+
+  const gameComplete = useMemo(
+    () => matchesFound === totalRulePairs,
+    [matchesFound, totalRulePairs],
+  );
+
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{
+        background: `radial-gradient(circle at top, ${BLUEBOOK_BLUE_LIGHT} 0, ${BLUEBOOK_BLUE} 45%, #001b3a 100%)`,
+      }}
+    >
+      <div className="max-w-5xl w-full bg-white/95 shadow-2xl rounded-3xl p-6 md:p-8 border border-blue-900/40">
+        <header className="flex flex-col gap-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-blue-900">
+                Bluebook Matching Game
+              </h1>
+              <p className="text-sm md:text-base text-blue-900/80 mt-1 max-w-2xl">
+                Flip two cards to match each Bluebook rule number with its topic.
+                Use the levels below to move from smaller boards to more advanced
+                rules. Every rule appears in at least one level.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 items-center justify-start md:justify-end">
+              <div className="px-3 py-2 rounded-2xl bg-blue-50 border border-blue-200 text-xs md:text-sm text-blue-900 font-medium">
+                Moves: <span className="font-semibold">{moves}</span>
+              </div>
+              <div className="px-3 py-2 rounded-2xl bg-blue-50 border border-blue-200 text-xs md:text-sm text-blue-900 font-medium">
+                Matches: <span className="font-semibold">{matchesFound}</span> / {totalRulePairs}
+              </div>
+              <button
+                onClick={resetGame}
+                className="px-4 py-2 rounded-2xl text-xs md:text-sm font-semibold text-white shadow-md hover:shadow-lg active:scale-[0.98] transition border border-blue-900"
+                style={{ backgroundColor: BLUEBOOK_BLUE }}
+              >
+                Reset Level
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs md:text-sm font-semibold text-blue-900 mr-1">
+              Levels:
+            </span>
+            {LEVELS.map((level, idx) => {
+              const isActive = idx === currentLevelIndex;
+              return (
+                <button
+                  key={level.id}
+                  onClick={() => loadLevel(idx)}
+                  className={`px-3 py-1.5 rounded-full text-xs md:text-sm font-semibold border transition
+                    ${isActive
+                      ? "bg-blue-900 text-white border-blue-900"
+                      : "bg-white text-blue-900 border-blue-300 hover:bg-blue-50"}
+                  `}
+                >
+                  {level.name}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-xs md:text-sm text-blue-900/80">
+            {currentLevel.description}
+          </p>
+        </header>
+
+        {gameComplete && (
+          <div className="mb-4 px-4 py-3 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm md:text-base font-medium flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <span>
+              Nicely done! You've matched all of the pairs on this level.
+            </span>
+            {currentLevelIndex < LEVELS.length - 1 && (
+              <button
+                onClick={() => loadLevel(currentLevelIndex + 1)}
+                className="px-4 py-2 rounded-2xl text-xs md:text-sm font-semibold text-white shadow-md hover:shadow-lg active:scale-[0.98] transition border border-emerald-700"
+                style={{ backgroundColor: "#059669" }}
+              >
+                Go to Next Level
+              </button>
+            )}
+          </div>
+        )}
+
+        <div
+          className="grid gap-2 md:gap-3"
+          style={{
+            gridTemplateColumns: `repeat(${currentLevel.cols}, minmax(0, 1fr))`,
+          }}
+        >
+          {tiles.map((tile, index) => {
+            const isFaceUp = tile.isFlipped || tile.isMatched;
+            const isPulsing = pulseIds.includes(tile.id);
+
+            const baseStyle = isFaceUp
+              ? {
+                  backgroundColor: "white",
+                  color: BLUEBOOK_BLUE,
+                  borderColor: BLUEBOOK_BLUE,
+                  transform: "rotateY(0deg)",
+                  transformStyle: "preserve-3d",
+                  transition:
+                    "transform 0.35s ease, background-color 0.2s ease, border-color 0.2s ease",
+                }
+              : {
+                  backgroundColor: BLUEBOOK_BLUE,
+                  color: "white",
+                  borderColor: "#001b3a",
+                  transform: "rotateY(180deg)",
+                  transformStyle: "preserve-3d",
+                  transition:
+                    "transform 0.35s ease, background-color 0.2s ease, border-color 0.2s ease",
+                };
+
+            const pulseStyle =
+              isPulsing && pulseType === "success"
+                ? {
+                    boxShadow: "0 0 0 3px rgba(16, 185, 129, 0.75)",
+                    borderColor: "#10B981",
+                  }
+                : isPulsing && pulseType === "fail"
+                ? {
+                    boxShadow: "0 0 0 3px rgba(248, 113, 113, 0.85)",
+                    borderColor: "#EF4444",
+                  }
+                : {};
+
+            return (
+              <button
+                key={tile.id}
+                onClick={() => handleTileClick(index)}
+                disabled={isChecking || tile.isMatched}
+                className={`relative aspect-square rounded-xl md:rounded-2xl text-[0.55rem] xs:text-xs sm:text-sm md:text-sm lg:text-base font-semibold shadow-md border transition-transform duration-150 ease-out
+                  ${!tile.isMatched ? "hover:shadow-lg" : ""}
+                `}
+                style={{
+                  ...baseStyle,
+                  ...pulseStyle,
+                }}>
+                <div className="w-full h-full flex items-center justify-center px-1 md:px-2 text-center leading-snug">
+                  {isFaceUp ? (
+                  <span>{tile.label}</span>
+                ) : (
+                  <span
+                    style={{
+                      transform: "rotateY(180deg)",
+                      display: "inline-block",
+                    }}
+                  >
+                    Bluebook?
+                  </span>
+                )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default BluebookMatchingGame;
